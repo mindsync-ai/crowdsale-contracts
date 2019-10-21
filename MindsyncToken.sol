@@ -1,4 +1,5 @@
-pragma solidity ^0.4.23;
+pragma solidity >=0.5.12;
+
 
 /**
  * @title ERC20Basic
@@ -6,11 +7,12 @@ pragma solidity ^0.4.23;
  * @dev see https://github.com/ethereum/EIPs/issues/179
  */
 contract ERC20Basic {
-  function totalSupply() public view returns (uint256);
+  function totalSupply() external view returns (uint256);
   function balanceOf(address who) public view returns (uint256);
   function transfer(address to, uint256 value) public returns (bool);
   event Transfer(address indexed from, address indexed to, uint256 value);
 }
+
 
 /**
  * @title SafeMath
@@ -62,6 +64,8 @@ library SafeMath {
   }
 }
 
+
+
 /**
  * @title Basic token
  * @dev Basic version of StandardToken, with no allowances.
@@ -86,12 +90,7 @@ contract BasicToken is ERC20Basic {
   * @param _value The amount to be transferred.
   */
   function transfer(address _to, uint256 _value) public returns (bool) {
-    require(_to != address(0));
-    require(_value <= balances[msg.sender]);
-
-    balances[msg.sender] = balances[msg.sender].sub(_value);
-    balances[_to] = balances[_to].add(_value);
-    emit Transfer(msg.sender, _to, _value);
+    _transfer(msg.sender, _to, _value);
     return true;
   }
 
@@ -103,7 +102,23 @@ contract BasicToken is ERC20Basic {
   function balanceOf(address _owner) public view returns (uint256) {
     return balances[_owner];
   }
+
+  /**
+  * @dev Transfer token for a specified addresses
+  * @param _from The address to transfer from.
+  * @param _to The address to transfer to.
+  * @param _value The amount to be transferred.
+  */
+  function _transfer(address _from, address _to, uint256 _value) internal {
+      require(_to != address(0));
+      require(_value <= balances[_from]);
+  
+      balances[_from] = balances[_from].sub(_value);
+      balances[_to] = balances[_to].add(_value);
+      emit Transfer(_from, _to, _value);
+  }
 }
+
 
 /**
  * @title ERC20 interface
@@ -124,6 +139,7 @@ contract ERC20 is ERC20Basic {
   );
 }
 
+
 /**
  * @title Standard ERC20 token
  *
@@ -134,6 +150,7 @@ contract ERC20 is ERC20Basic {
 contract StandardToken is ERC20, BasicToken {
 
   mapping (address => mapping (address => uint256)) internal allowed;
+
 
   /**
    * @dev Transfer tokens from one address to another
@@ -245,6 +262,8 @@ contract StandardToken is ERC20, BasicToken {
 
 }
 
+
+
 /**
  * @title Ownable
  * @dev The Ownable contract has an owner address, and provides basic authorization control
@@ -253,11 +272,13 @@ contract StandardToken is ERC20, BasicToken {
 contract Ownable {
   address public owner;
 
+
   event OwnershipRenounced(address indexed previousOwner);
   event OwnershipTransferred(
     address indexed previousOwner,
     address indexed newOwner
   );
+
 
   /**
    * @dev The Ownable constructor sets the original `owner` of the contract to the sender
@@ -302,6 +323,7 @@ contract Ownable {
   }
 }
 
+
 /**
  * @title Mintable token
  * @dev Simple ERC20 Token example, with mintable token creation
@@ -313,6 +335,7 @@ contract MintableToken is StandardToken, Ownable {
   event MintFinished();
 
   bool public mintingFinished = false;
+
 
   modifier canMint() {
     require(!mintingFinished);
@@ -336,7 +359,7 @@ contract MintableToken is StandardToken, Ownable {
   )
     hasMintPermission
     canMint
-    public
+    internal
     returns (bool)
   {
     totalSupply_ = totalSupply_.add(_amount);
@@ -350,14 +373,15 @@ contract MintableToken is StandardToken, Ownable {
    * @dev Function to stop minting new tokens.
    * @return True if the operation was successful.
    */
-  function finishMinting() onlyOwner canMint public returns (bool) {
+  function finishMinting() onlyOwner canMint internal returns (bool) {
     mintingFinished = true;
     emit MintFinished();
     return true;
   }
 }
 
-contract FreezableToken is StandardToken {
+
+contract FreezableToken is StandardToken, Ownable {
     // freezing chains
     mapping (bytes32 => uint64) internal chains;
     // freezing amounts for each chain
@@ -365,8 +389,21 @@ contract FreezableToken is StandardToken {
     // total freezing balance per address
     mapping (address => uint) internal freezingBalance;
 
+    // reducible freezing chains
+    mapping (bytes32 => uint64) internal reducibleChains;
+    // reducible freezing amounts for each chain
+    mapping (bytes32 => uint) internal reducibleFreezings;
+    // total reducible freezing balance per address
+    mapping (address => uint) internal reducibleFreezingBalance;
+
     event Freezed(address indexed to, uint64 release, uint amount);
     event Released(address indexed owner, uint amount);
+    event FreezeReduced(address indexed owner, uint64 release, uint amount);
+
+    modifier hasReleasePermission() {
+        require(msg.sender == owner, "Access denied");
+        _;
+    }
 
     /**
      * @dev Gets the balance of the specified address include freezing tokens.
@@ -374,7 +411,7 @@ contract FreezableToken is StandardToken {
      * @return An uint256 representing the amount owned by the passed address.
      */
     function balanceOf(address _owner) public view returns (uint256 balance) {
-        return super.balanceOf(_owner) + freezingBalance[_owner];
+        return super.balanceOf(_owner) + freezingBalance[_owner] + reducibleFreezingBalance[_owner];
     }
 
     /**
@@ -386,8 +423,22 @@ contract FreezableToken is StandardToken {
         return super.balanceOf(_owner);
     }
 
+    /**
+     * @dev Gets the freezed balance of the specified address.
+     * @param _owner The address to query the the balance of.
+     * @return An uint256 representing the amount owned by the passed address.
+     */
     function freezingBalanceOf(address _owner) public view returns (uint256 balance) {
         return freezingBalance[_owner];
+    }
+
+    /**
+     * @dev Gets the reducible freezed balance of the specified address.
+     * @param _owner The address to query the the balance of.
+     * @return An uint256 representing the amount owned by the passed address.
+     */
+    function reducibleFreezingBalanceOf(address _owner) public view returns (uint256 balance) {
+        return reducibleFreezingBalance[_owner];
     }
 
     /**
@@ -403,6 +454,19 @@ contract FreezableToken is StandardToken {
     }
 
     /**
+     * @dev gets reducible freezing count
+     * @param _addr Address of freeze tokens owner.
+     * @param _sender Address of frozen tokens sender.
+     */
+    function reducibleFreezingCount(address _addr, address _sender) public view returns (uint count) {
+        uint64 release = reducibleChains[toKey2(_addr, _sender, 0)];
+        while (release != 0) {
+            count++;
+            release = reducibleChains[toKey2(_addr, _sender, release)];
+        }
+    }
+
+    /**
      * @dev gets freezing end date and freezing balance for the freezing portion specified by index.
      * @param _addr Address of freeze tokens owner.
      * @param _index Freezing portion index. It ordered by release date descending.
@@ -411,10 +475,26 @@ contract FreezableToken is StandardToken {
         for (uint i = 0; i < _index + 1; i++) {
             _release = chains[toKey(_addr, _release)];
             if (_release == 0) {
-                return;
+                return (0, 0);
             }
         }
         _balance = freezings[toKey(_addr, _release)];
+    }
+
+    /**
+     * @dev gets reducible freezing end date and reducible freezing balance for the freezing portion specified by index.
+     * @param _addr Address of freeze tokens owner.
+     * @param _sender Address of frozen tokens sender.
+     * @param _index Freezing portion index. It ordered by release date descending.
+     */
+    function getReducibleFreezing(address _addr, address _sender, uint _index) public view returns (uint64 _release, uint _balance) {
+        for (uint i = 0; i < _index + 1; i++) {
+            _release = reducibleChains[toKey2(_addr, _sender, _release)];
+            if (_release == 0) {
+                return (0, 0);
+            }
+        }
+        _balance = reducibleFreezings[toKey2(_addr, _sender, _release)];
     }
 
     /**
@@ -426,37 +506,158 @@ contract FreezableToken is StandardToken {
      * @param _until Release date, must be in future.
      */
     function freezeTo(address _to, uint _amount, uint64 _until) public {
-        require(_to != address(0));
-        require(_amount <= balances[msg.sender]);
+        _freezeTo(msg.sender, _to, _amount, _until);
+    }
 
-        balances[msg.sender] = balances[msg.sender].sub(_amount);
+    /**
+     * @dev freeze your tokens to the specified address.
+     *      Be careful, gas usage is not deterministic,
+     *      and depends on how many freezes _to address already has.
+     * @param _to Address to which token will be freeze.
+     * @param _amount Amount of token to freeze.
+     * @param _until Release date, must be in future.
+     */
+    function _freezeTo(address _from, address _to, uint _amount, uint64 _until) internal {
+        require(_to != address(0));
+        require(_amount <= balances[_from]);
+
+        balances[_from] = balances[_from].sub(_amount);
 
         bytes32 currentKey = toKey(_to, _until);
         freezings[currentKey] = freezings[currentKey].add(_amount);
         freezingBalance[_to] = freezingBalance[_to].add(_amount);
 
         freeze(_to, _until);
+        emit Transfer(_from, _to, _amount);
+        emit Freezed(_to, _until, _amount);
+    }
+
+    /**
+     * @dev freeze your tokens to the specified address with posibility to reduce freezing.
+     *      Be careful, gas usage is not deterministic,
+     *      and depends on how many freezes _to address already has.
+     * @param _to Address to which token will be freeze.
+     * @param _amount Amount of token to freeze.
+     * @param _until Release date, must be in future.
+     */
+    function reducibleFreezeTo(address _to, uint _amount, uint64 _until) public {
+        require(_to != address(0));
+        require(_amount <= balances[msg.sender]);
+        require(_until > block.timestamp);
+
+        balances[msg.sender] = balances[msg.sender].sub(_amount);
+
+        bytes32 currentKey = toKey2(_to, msg.sender, _until);
+        reducibleFreezings[currentKey] = reducibleFreezings[currentKey].add(_amount);
+        reducibleFreezingBalance[_to] = reducibleFreezingBalance[_to].add(_amount);
+
+        reducibleFreeze(_to, _until);
         emit Transfer(msg.sender, _to, _amount);
         emit Freezed(_to, _until, _amount);
+    }
+
+    /**
+     * @dev reduce freeze time for _amount of tokens for reducible freezing of address _to by frozen tokens sender.
+     *      Removes reducible freezing for _amount of tokens if _newUntil in the past
+     *      Be careful, gas usage is not deterministic,
+     *      and depends on how many freezes _to address already has.
+     * @param _to Address to which token will be freeze.
+     * @param _amount Amount of token to freeze.
+     * @param _until Release date, must be in future.
+     */
+    function reduceFreezingTo(address _to, uint _amount, uint64 _until, uint64 _newUntil) public {
+        require(_to != address(0));
+
+        // Don't allow to move reducible freezing to the future
+        require(_newUntil < _until, "Attempt to move the freezing into the future");
+
+        bytes32 currentKey = toKey2(_to, msg.sender, _until);
+        uint amount = reducibleFreezings[currentKey];
+        require(amount > 0, "Freezing not found");
+
+        if (_amount >= amount) {
+            delete reducibleFreezings[currentKey];
+
+            uint64 next = reducibleChains[currentKey];
+            bytes32 parent = toKey2(_to, msg.sender, uint64(0));
+            while (reducibleChains[parent] != _until) {
+                parent = toKey2(_to, msg.sender, reducibleChains[parent]);
+            }
+
+            if (next == 0) {
+                delete reducibleChains[parent];
+            }
+            else {
+                reducibleChains[parent] = next;
+            }
+
+            if (_newUntil <= block.timestamp) {
+                balances[_to] = balances[_to].add(amount);
+                reducibleFreezingBalance[_to] = reducibleFreezingBalance[_to].sub(amount);
+
+                emit Released(_to, amount);
+            }
+            else {
+                bytes32 newKey = toKey2(_to, msg.sender, _newUntil);
+                reducibleFreezings[newKey] = reducibleFreezings[newKey].add(amount);
+
+                reducibleFreeze(_to, _newUntil);
+
+                emit FreezeReduced(_to, _newUntil, amount);
+            }
+        }
+        else {
+            reducibleFreezings[currentKey] = reducibleFreezings[currentKey].sub(_amount);
+            if (_newUntil <= block.timestamp) {
+                balances[_to] = balances[_to].add(_amount);
+                reducibleFreezingBalance[_to] = reducibleFreezingBalance[_to].sub(_amount);
+
+                emit Released(_to, _amount);
+            }
+            else {
+                bytes32 newKey = toKey2(_to, msg.sender, _newUntil);
+                reducibleFreezings[newKey] = reducibleFreezings[newKey].add(_amount);
+
+                reducibleFreeze(_to, _newUntil);
+
+                emit FreezeReduced(_to, _newUntil, _amount);
+            }
+        }
     }
 
     /**
      * @dev release first available freezing tokens.
      */
     function releaseOnce() public {
-        bytes32 headKey = toKey(msg.sender, 0);
+        _releaseOnce(msg.sender);
+    }
+
+    /**
+     * @dev release first available freezing tokens (support).
+     * @param _addr Address of frozen tokens owner.
+     */
+    function releaseOnceFor(address _addr) hasReleasePermission public {
+        _releaseOnce(_addr);
+    }
+
+    /**
+     * @dev release first available freezing tokens.
+     * @param _addr Address of frozen tokens owner.
+     */
+    function _releaseOnce(address _addr) internal {
+        bytes32 headKey = toKey(_addr, 0);
         uint64 head = chains[headKey];
-        require(head != 0);
-        require(uint64(block.timestamp) > head);
-        bytes32 currentKey = toKey(msg.sender, head);
+        require(head != 0, "Freezing not found");
+        require(uint64(block.timestamp) > head, "Premature release attempt");
+        bytes32 currentKey = toKey(_addr, head);
 
         uint64 next = chains[currentKey];
 
         uint amount = freezings[currentKey];
         delete freezings[currentKey];
 
-        balances[msg.sender] = balances[msg.sender].add(amount);
-        freezingBalance[msg.sender] = freezingBalance[msg.sender].sub(amount);
+        balances[_addr] = balances[_addr].add(amount);
+        freezingBalance[_addr] = freezingBalance[_addr].sub(amount);
 
         if (next == 0) {
             delete chains[headKey];
@@ -464,7 +665,53 @@ contract FreezableToken is StandardToken {
             chains[headKey] = next;
             delete chains[currentKey];
         }
-        emit Released(msg.sender, amount);
+        emit Released(_addr, amount);
+    }
+
+    /**
+     * @dev release first available reducible freezing tokens.
+     * @param _sender Address of frozen tokens sender.
+     */
+    function releaseReducibleFreezingOnce(address _sender) public {
+        _releaseReducibleFreezingOnce(msg.sender, _sender);
+    }
+
+    /**
+     * @dev release first available reducible freezing tokens for _addr.
+     * @param _addr Address of frozen tokens owner.
+     * @param _sender Address of frozen tokens sender.
+     */
+    function releaseReducibleFreezingOnceFor(address _addr, address _sender) hasReleasePermission public {
+        _releaseReducibleFreezingOnce(_addr, _sender);
+    }
+
+    /**
+     * @dev release first available reducible freezing tokens.
+     * @param _addr Address of frozen tokens owner.
+     * @param _sender Address of frozen tokens sender.
+     */
+    function _releaseReducibleFreezingOnce(address _addr, address _sender) internal {
+        bytes32 headKey = toKey2(_addr, _sender, 0);
+        uint64 head = reducibleChains[headKey];
+        require(head != 0, "Freezing not found");
+        require(uint64(block.timestamp) > head, "Premature release attempt");
+        bytes32 currentKey = toKey2(_addr, _sender, head);
+
+        uint64 next = reducibleChains[currentKey];
+
+        uint amount = reducibleFreezings[currentKey];
+        delete reducibleFreezings[currentKey];
+
+        balances[_addr] = balances[_addr].add(amount);
+        reducibleFreezingBalance[_addr] = reducibleFreezingBalance[_addr].sub(amount);
+
+        if (next == 0) {
+            delete reducibleChains[headKey];
+        } else {
+            reducibleChains[headKey] = next;
+            delete reducibleChains[currentKey];
+        }
+        emit Released(_addr, amount);
     }
 
     /**
@@ -472,13 +719,68 @@ contract FreezableToken is StandardToken {
      * @return how many tokens was released
      */
     function releaseAll() public returns (uint tokens) {
+        tokens = _releaseAll(msg.sender);
+    }
+
+    /**
+     * @dev release all available for release freezing tokens for address _addr. Gas usage is not deterministic!
+     * @param _addr Address of frozen tokens owner.
+     * @return how many tokens was released
+     */
+    function releaseAllFor(address _addr) hasReleasePermission public returns (uint tokens) {
+        tokens = _releaseAll(_addr);
+    }
+
+    /**
+     * @dev release all available for release freezing tokens.
+     * @param _addr Address of frozen tokens owner.
+     * @return how many tokens was released
+     */
+    function _releaseAll(address _addr) internal returns (uint tokens) {
         uint release;
         uint balance;
-        (release, balance) = getFreezing(msg.sender, 0);
+        (release, balance) = getFreezing(_addr, 0);
         while (release != 0 && block.timestamp > release) {
-            releaseOnce();
+            _releaseOnce(_addr);
             tokens += balance;
-            (release, balance) = getFreezing(msg.sender, 0);
+            (release, balance) = getFreezing(_addr, 0);
+        }
+    }
+
+    /**
+     * @dev release all available for release reducible freezing tokens sent by _sender. Gas usage is not deterministic!
+     * @param _sender Address of frozen tokens sender.
+     * @return how many tokens was released
+     */
+    function reducibleReleaseAll(address _sender) public returns (uint tokens) {
+        tokens = _reducibleReleaseAll(msg.sender, _sender);
+    }
+
+    /**
+     * @dev release all available for release reducible freezing tokens sent by _sender to _addr. Gas usage is not deterministic!
+     * @param _addr Address of frozen tokens owner.
+     * @param _sender Address of frozen tokens sender.
+     * @return how many tokens was released
+     */
+    function reducibleReleaseAllFor(address _addr, address _sender) hasReleasePermission public returns (uint tokens) {
+        tokens = _reducibleReleaseAll(_addr, _sender);
+    }
+
+
+    /**
+     * @dev release all available for release reducible freezing tokens sent by _sender to _addr.
+     * @param _addr Address of frozen tokens owner.
+     * @param _sender Address of frozen tokens sender.
+     * @return how many tokens was released
+     */
+    function _reducibleReleaseAll(address _addr, address _sender) internal returns (uint tokens) {
+        uint release;
+        uint balance;
+        (release, balance) = getReducibleFreezing(_addr, _sender, 0);
+        while (release != 0 && block.timestamp > release) {
+            releaseReducibleFreezingOnce(_sender);
+            tokens += balance;
+            (release, balance) = getReducibleFreezing(_addr, _sender, 0);
         }
     }
 
@@ -488,6 +790,17 @@ contract FreezableToken is StandardToken {
             result := or(result, mul(_addr, 0x10000000000000000))
             result := or(result, _release)
         }
+    }
+
+    function toKey2(address _addr1, address _addr2, uint _release) internal pure returns (bytes32 result) {
+        bytes32 key1 = 0x5749534800000000000000000000000000000000000000000000000000000000;
+        bytes32 key2 = 0x8926457892347780720546870000000000000000000000000000000000000000;
+        assembly {
+            key1 := or(key1, mul(_addr1, 0x10000000000000000))
+            key1 := or(key1, _release)
+            key2 := or(key2, _addr2)
+        }
+        result = keccak256(abi.encodePacked(key1, key2));
     }
 
     function freeze(address _to, uint64 _until) internal {
@@ -522,7 +835,41 @@ contract FreezableToken is StandardToken {
 
         chains[parentKey] = _until;
     }
+
+    function reducibleFreeze(address _to, uint64 _until) internal {
+        require(_until > block.timestamp);
+        bytes32 key = toKey2(_to, msg.sender, _until);
+        bytes32 parentKey = toKey2(_to, msg.sender, uint64(0));
+        uint64 next = reducibleChains[parentKey];
+
+        if (next == 0) {
+            reducibleChains[parentKey] = _until;
+            return;
+        }
+
+        bytes32 nextKey = toKey2(_to, msg.sender, next);
+        uint parent;
+
+        while (next != 0 && _until > next) {
+            parent = next;
+            parentKey = nextKey;
+
+            next = reducibleChains[nextKey];
+            nextKey = toKey2(_to, msg.sender, next);
+        }
+
+        if (_until == next) {
+            return;
+        }
+
+        if (next != 0) {
+            reducibleChains[key] = next;
+        }
+
+        reducibleChains[parentKey] = _until;
+    }
 }
+
 
 /**
  * @title Burnable Token
@@ -551,6 +898,8 @@ contract BurnableToken is BasicToken {
     emit Transfer(_who, address(0), _value);
   }
 }
+
+
 
 /**
  * @title Pausable
@@ -596,62 +945,44 @@ contract Pausable is Ownable {
   }
 }
 
-contract FreezableMintableToken is FreezableToken, MintableToken {
-    /**
-     * @dev Mint the specified amount of token to the specified address and freeze it until the specified date.
-     *      Be careful, gas usage is not deterministic,
-     *      and depends on how many freezes _to address already has.
-     * @param _to Address to which token will be freeze.
-     * @param _amount Amount of token to mint and freeze.
-     * @param _until Release date, must be in future.
-     * @return A boolean that indicates if the operation was successful.
-     */
-    function mintAndFreeze(address _to, uint _amount, uint64 _until) public onlyOwner canMint returns (bool) {
-        totalSupply_ = totalSupply_.add(_amount);
-
-        bytes32 currentKey = toKey(_to, _until);
-        freezings[currentKey] = freezings[currentKey].add(_amount);
-        freezingBalance[_to] = freezingBalance[_to].add(_amount);
-
-        freeze(_to, _until);
-        emit Mint(_to, _amount);
-        emit Freezed(_to, _until, _amount);
-        emit Transfer(msg.sender, _to, _amount);
-        return true;
-    }
-}
 
 contract Consts {
     uint public constant TOKEN_DECIMALS = 18;
     uint8 public constant TOKEN_DECIMALS_UINT8 = 18;
     uint public constant TOKEN_DECIMAL_MULTIPLIER = 10 ** TOKEN_DECIMALS;
-
-    string public constant TOKEN_NAME = "Mindsync";
+    string public constant TOKEN_NAME = "MindsyncAI";
     string public constant TOKEN_SYMBOL = "MAI";
-    bool public constant PAUSED = false;
-    address public constant TARGET_USER = 0x108fd0EF043b56adfD0C80A9A453a0c5ad299117;
-    
-    bool public constant CONTINUE_MINTING = true;
+    uint public constant INITIAL_SUPPLY = 150000000 * TOKEN_DECIMAL_MULTIPLIER;
 }
 
-contract MainToken is Consts, FreezableMintableToken, BurnableToken, Pausable {
+
+contract MindsyncAIToken is Consts, BurnableToken, Pausable, MintableToken, FreezableToken
+{
+    uint256 startdate;
+
+    address beneficiary1;
+    address beneficiary2;
+    address beneficiary3;
+    address beneficiary4;
+    address beneficiary5;
+    address beneficiary6;
+
     event Initialized();
     bool public initialized = false;
 
     constructor() public {
         init();
-        transferOwnership(TARGET_USER);
     }
 
-    function name() public pure returns (string _name) {
+    function name() public pure returns (string memory) {
         return TOKEN_NAME;
     }
 
-    function symbol() public pure returns (string _symbol) {
+    function symbol() public pure returns (string memory) {
         return TOKEN_SYMBOL;
     }
 
-    function decimals() public pure returns (uint8 _decimals) {
+    function decimals() public pure returns (uint8) {
         return TOKEN_DECIMALS_UINT8;
     }
 
@@ -664,30 +995,57 @@ contract MainToken is Consts, FreezableMintableToken, BurnableToken, Pausable {
         require(!paused);
         return super.transfer(_to, _value);
     }
-    
+
     function init() private {
         require(!initialized);
         initialized = true;
 
-        if (PAUSED) {
-            pause();
-        }
 
-        address[5] memory addresses = [address(0x56652b3af157535da3f6a5601f9c0c0dfa788024),address(0x091db50dd49cb0bec67bff3cef52724a57e7955c),address(0xdcf85aa5a932c4f9252c308929fc933b1ca321f8),address(0x68991c51518bea730493891f45d64cbccb72e2df),address(0xf847b03799170fbd8981cc0913072e3a1f78ae49)];
-        uint[5] memory amounts = [uint(200000000000000000000000000),uint(37500000000000000000000000),uint(80000000000000000000000000),uint(50000000000000000000000000),uint(20000000000000000000000000)];
-        uint64[5] memory freezes = [uint64(1561928401),uint64(1585688401),uint64(1551387601),uint64(0),uint64(0)];
+        // Total Supply
+        uint256 amount = INITIAL_SUPPLY;
 
-        for (uint i = 0; i < addresses.length; i++) {
-            if (freezes[i] == 0) {
-                mint(addresses[i], amounts[i]);
-            } else {
-                mintAndFreeze(addresses[i], amounts[i], freezes[i]);
-            }
-        }
-        
-        if (!CONTINUE_MINTING) {
-            finishMinting();
-        }
+        // Mint all tokens
+        mint(address(this), amount);
+        finishMinting();
+
+        // Start date is October 01, 2019
+        startdate = 1569888000;
+
+
+        beneficiary1 = 0x5E65Ae75eEE5f58Ee944372Fa0855BAbc8c035b1; // Public sale
+        beneficiary2 = 0x5497c008CCa91CF8C3e597C47397f4643f7Be432; // Team 
+        beneficiary3 = 0x7E2a22A39BDcf6188D5c06f156d2B377ab925EB6; // Advisors
+        beneficiary4 = 0xB092548821D9432aFC720a4b1D9f052Ef2F5bB2e; // Bounty
+        beneficiary5 = 0xD46a8CB0d6dB18D16423a215AC5Da73D08B629eA; // Reward pool
+        beneficiary6 = 0xb801d1d91Ac6e85b17c80c04aC0c7E0E739fc853; // Foundation
+
+        // Public sale (50%)
+        _transfer(address(this), beneficiary1, totalSupply().mul(50).div(100));
+
+        // Team tokens (15%) are frozen and will be unlocked every six months after 1 year.
+        _freezeTo(address(this), beneficiary2, totalSupply().mul(15).div(100).div(4), uint64(startdate + 366 days));
+        _freezeTo(address(this), beneficiary2, totalSupply().mul(15).div(100).div(4), uint64(startdate + 548 days));
+        _freezeTo(address(this), beneficiary2, totalSupply().mul(15).div(100).div(4), uint64(startdate + 731 days));
+        _freezeTo(address(this), beneficiary2, totalSupply().mul(15).div(100).div(4), uint64(startdate + 913 days));
+
+        // Advisors tokens (5%) are frozen and will be unlocked quarterly after 1 year.
+        _freezeTo(address(this), beneficiary3, totalSupply().mul(5).div(100).div(4), uint64(startdate + 366 days));
+        _freezeTo(address(this), beneficiary3, totalSupply().mul(5).div(100).div(4), uint64(startdate + 458 days));
+        _freezeTo(address(this), beneficiary3, totalSupply().mul(5).div(100).div(4), uint64(startdate + 548 days));
+        _freezeTo(address(this), beneficiary3, totalSupply().mul(5).div(100).div(4), uint64(startdate + 639 days));
+
+        // Bounty tokens (2%) will be frozen during the distribution process.
+        _transfer(address(this), beneficiary4, totalSupply().mul(2).div(100));
+
+        // Reward fund tokens (20%) will be stored on Mindsync reward pool smart-contract and frozen.
+        // Please refer to Whitepaper for more infomation about this fund.
+        _freezeTo(address(this), beneficiary5, totalSupply().mul(20).div(100).div(4), uint64(startdate + 183 days));
+        _freezeTo(address(this), beneficiary5, totalSupply().mul(20).div(100).div(4), uint64(startdate + 366 days));
+        _freezeTo(address(this), beneficiary5, totalSupply().mul(20).div(100).div(4), uint64(startdate + 548 days));
+        _freezeTo(address(this), beneficiary5, totalSupply().mul(20).div(100).div(4), uint64(startdate + 731 days));
+
+        // Foundation tokens (8%) will be frozen on Mindsync foundation smart-contract for 1 year.
+        _freezeTo(address(this), beneficiary6, totalSupply().mul(8).div(100), uint64(startdate + 366 days));
 
         emit Initialized();
     }
